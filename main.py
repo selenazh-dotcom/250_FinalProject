@@ -27,6 +27,8 @@ import mediapipe as mp
 import numpy as np
 import struct, socket
 import math
+import pickle
+
 
 from capture import CameraCapture, landmarker
 from model2 import (
@@ -38,28 +40,34 @@ from model2 import (
 )
 from utils.cvfpscalc import CvFpsCalc
 
-# ── RPi Server Config (fill in when ready) ────────────────────────────────────
+# RPi Server Config
 
-RPI_HOST    = "172.20.10.8"   # TODO: replace with your RPi's IP
-RPI_PORT    = 5005             # TODO: match your RPi server port
+RPI_HOST    = "192.168.0.128"   
+RPI_PORT    = 5005            
 SEND_TO_RPI = True            # flip to True once RPi server is ready
 
-# Keep payload safely below UDP limits.
-MAX_DATAGRAM_SIZE = 1200
+# # Keep payload safely below UDP limits.
+# MAX_DATAGRAM_SIZE = 1200
 
-# Header format:
-# frame_id (I), frame/translation (1), chunk_id (H), total_chunks (H), payload_len (H)
-HEADER_FMT = "!IBHHH"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)
-MAX_CHUNK_PAYLOAD = MAX_DATAGRAM_SIZE - HEADER_SIZE
+# # Header format:
+# # frame_id (I), frame/translation (1), chunk_id (H), total_chunks (H), payload_len (H)
+# HEADER_FMT = "!IBHHH"
+# HEADER_SIZE = struct.calcsize(HEADER_FMT)
+# MAX_CHUNK_PAYLOAD = MAX_DATAGRAM_SIZE - HEADER_SIZE
 
-MSG_TYPE_FRAME = 0
-MSG_TYPE_TEXT = 1
+# MSG_TYPE_FRAME = 0
+# MSG_TYPE_TEXT = 1
 
 
-# ── RPi send stub ─────────────────────────────────────────────────────────────
+# Setup UDP Socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+target = (RPI_HOST, RPI_PORT)
+cap = cv2.VideoCapture(0)
 
-def send_to_rpi(frame, translation: str, frame_id) -> None:
+
+# send to RPi
+
+def send_to_rpi(frame, translation: str) -> None:
     """
     send to RPi via UDP
 
@@ -68,44 +76,19 @@ def send_to_rpi(frame, translation: str, frame_id) -> None:
         translation:    current sentence string from SentenceBuilder.full_text
     """
    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    # resizing so it can fit in chunks through UDP's size limit
-    _, jpeg = cv2.imencode(".jpg", frame)
-    jpeg_bytes = jpeg.tobytes()
+    ret, frame = cap.read()
+   
+
+
+    msg = pickle.dumps(["TEXT", "test test"])
+    sock.sendto(msg, target)
     
-    total_chunks = math.ceil(len(jpeg_bytes) / MAX_CHUNK_PAYLOAD)
+    
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+    frame_msg = pickle.dumps(["FRAME", buffer])
+    sock.sendto(frame_msg, target)
 
-    for chunk_id in range(total_chunks):
-        start = chunk_id * MAX_CHUNK_PAYLOAD
-        end = start + MAX_CHUNK_PAYLOAD
-        payload = jpeg_bytes[start:end]
-
-        header = struct.pack(
-            HEADER_FMT,
-            frame_id,
-            MSG_TYPE_FRAME,
-            chunk_id,
-            total_chunks,
-            len(payload),
-        )
-
-        packet = header + payload
-        sock.sendto(packet, (RPI_HOST, RPI_PORT))
-
-    # send translaiton
-    if translation:
-        text_bytes = translation.encode("utf-8")
-
-        header = struct.pack(
-            HEADER_FMT,
-            frame_id,
-            MSG_TYPE_TEXT,
-            0,
-            1,
-            len(text_bytes),
-        )
-        sock.sendto(header + text_bytes, (RPI_HOST, RPI_PORT))
 
     pass
 
@@ -153,7 +136,6 @@ def main() -> None:
     builder  = SentenceBuilder()
     fps_calc = CvFpsCalc(buffer_len=10)
 
-    frame_id = 0
 
     cam.start()
     print("ASL Recognition running.")
@@ -214,8 +196,7 @@ def main() -> None:
 
             # ── 7. Send to RPi ────────────────────────────────────────
             if SEND_TO_RPI:
-                send_to_rpi(frame, builder.full_text, frame_id)
-                frame_id+=1
+                send_to_rpi(frame, builder.full_text)
 
             # ── Keyboard controls ─────────────────────────────────────
             key = cv2.waitKey(1) & 0xFF
