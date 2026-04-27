@@ -1,4 +1,16 @@
-# receiver.py
+""" 
+receiver.py
+
+Function:
+    Opens up a user interface that receives camera footage and text translation
+    from the RPi over UDP. 
+    Can read the receiving text out loud with a toggle function.
+
+Usage:
+    In terminal - python3 receiver.py --port 5005 --web-port 8080
+
+"""
+
 from __future__ import annotations
 
 import pickle
@@ -11,13 +23,12 @@ import numpy as np
 import pyttsx3
 from flask import Flask, Response, render_template_string, jsonify
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# connections 
 
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 5005
 WORDS_FILE  = "words.txt"
 
-# ── Shared state ──────────────────────────────────────────────────────────────
 
 _latest_jpeg : bytes = b""
 _latest_text : str   = "no data yet"
@@ -27,8 +38,7 @@ _fps_counter         = {"frames": 0, "last": time.time(), "fps": 0.0}
 _tts_enabled = False
 _tts_lock    = threading.Lock()
 
-# ── TTS ───────────────────────────────────────────────────────────────────────
-
+# text to speech
 def speak_word(word: str) -> None:
     """Speak a single word in a background thread."""
     try:
@@ -40,8 +50,7 @@ def speak_word(word: str) -> None:
         print(f"[tts] Error: {e}")
         
 
-# ── UDP listener ──────────────────────────────────────────────────────────────
-
+# receive from UDP
 def udp_listener(port: int) -> None:
     global _latest_jpeg, _latest_text
 
@@ -102,7 +111,7 @@ def udp_listener(port: int) -> None:
         
 
 
-# ── Flask ─────────────────────────────────────────────────────────────────────
+# App HTML code - generated from Claude
 
 app = Flask(__name__)
 
