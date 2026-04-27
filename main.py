@@ -10,13 +10,16 @@ Pipeline:
     4. Predict ASL letter via TFLite classifier        (model.py)
     5. Accumulate confirmed letters into sentence      (model.py)
     6. Display annotated frame                         (opencv)
-    7. [TODO] Send frame + translation to RPi server
+    7. Send frame + translation to RPi server
 
 Controls:
     Q          - quit
-    SPACE      - insert space between words
-    BACKSPACE  - delete last character
     C          - clear sentence
+
+
+Claude was used to help understand the pipeline. 
+It also assisted with the frame annotation functions.
+    
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ from utils.cvfpscalc import CvFpsCalc
 
 # RPi Server Config
 
-RPI_HOST    = "192.168.0.128"   
+RPI_HOST    = "172.20.10.8"   
 RPI_PORT    = 5005            
 SEND_TO_RPI = True            # flip to True once RPi server is ready
 
@@ -62,38 +65,49 @@ SEND_TO_RPI = True            # flip to True once RPi server is ready
 # Setup UDP Socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 target = (RPI_HOST, RPI_PORT)
-cap = cv2.VideoCapture(0)
 
+_last_send_time = 0.0
 
-# send to RPi
+def send_to_rpi(frame, translation: str, flag) -> None:
+    global _last_send_time
 
-def send_to_rpi(frame, translation: str) -> None:
-    """
-    send to RPi via UDP
+    # the quit flag
+    if flag == 1:
+        for i in range(10):
+            flg = pickle.dumps(["FLAG", flag])
+            sock.sendto(flg, (RPI_HOST, RPI_PORT))
+        return
 
-    Args:
-        frame:          annotated BGR numpy array
-        translation:    current sentence string from SentenceBuilder.full_text
-    """
-   
+    now = time.time()
+    # limitting frame rate so socket isn't overwhelmed
+    if now - _last_send_time < 0.05:   
+        return
+    _last_send_time = now
 
-    ret, frame = cap.read()
-   
-
-
-    msg = pickle.dumps(["TEXT", "test test"])
-    sock.sendto(msg, target)
-    
-    
-    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+    # image frame
+    small = cv2.resize(frame, (320, 240))
+    _, buffer = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 30])
     frame_msg = pickle.dumps(["FRAME", buffer])
-    sock.sendto(frame_msg, target)
+
+    print(f"[send] packet size: {len(frame_msg)} bytes")
+
+    try:
+        sock.sendto(frame_msg, target)
+    # if packet size is too big or something, don't want entire thing to break
+    except OSError as e:
+        print(f"[send] frame dropped: {e}")
+        return   # skip text too — wait for next frame
+
+    # text translation
+    try:
+        msg = pickle.dumps(["TEXT", translation])
+        sock.sendto(msg, target)
+    except OSError as e:
+        print(f"[send] text dropped: {e}")
 
 
-    pass
+# ~~~had help from CLAUDE with this section of functions~~~~~
 
-
-# ── Tasks API landmark helpers ────────────────────────────────────────────────
 # The Tasks API returns landmarks as plain lists of objects with .x .y .z
 # (not the old mp.solutions landmark proto), so we reimplement the two
 # geometry helpers here rather than using the model.py versions which
@@ -128,7 +142,6 @@ def draw_bounding_rect_and_label(frame, brect, hand_label, label, confidence):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     classifier, labels = load_model()
@@ -136,22 +149,23 @@ def main() -> None:
     builder  = SentenceBuilder()
     fps_calc = CvFpsCalc(buffer_len=10)
 
+    flagSwitch = 0
 
     cam.start()
     print("ASL Recognition running.")
-    print("Controls: Q=quit | SPACE=space | BACKSPACE=delete | C=clear")
+    print("Controls: Q=quit | C=clear")
 
     try:
         while cam.running:
 
             fps = fps_calc.get()
 
-            # ── 1. Capture frame ──────────────────────────────────────
+            # get frame
             frame = cam.read()
             if frame is None:
                 break
 
-            # ── 2. Tasks API landmark detection ───────────────────────
+            # annotate
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             timestamp_ms = int(time.time() * 1000)
@@ -166,22 +180,21 @@ def main() -> None:
                     if result.handedness else "Hand"
                 )
 
-                # ── 3. Extract features ───────────────────────────────
+                # get features
                 landmark_list = calc_landmark_list_tasks(frame, hand_landmarks)
                 features      = pre_process_landmark(landmark_list)
                 brect         = calc_bounding_rect_tasks(frame, hand_landmarks)
 
-                # ── 4. Predict letter ─────────────────────────────────
+                # model prediction
                 idx, confidence = classifier(features)
                 label = labels[idx] if confidence >= 0.80 else ""
 
-                # ── 5. Update sentence ────────────────────────────────
+                # annotations
                 if label:
                     builder.update(label, confidence)
                 else:
                     builder._buffer.clear()
 
-                # ── Draw skeleton + bounding box + label ──────────────
                 draw_landmarks(frame, landmark_list)
                 draw_bounding_rect_and_label(
                     frame, brect, handedness_label, label, confidence
@@ -190,22 +203,24 @@ def main() -> None:
             else:
                 builder._buffer.clear()
 
-            # ── 6. Draw overlay + show ────────────────────────────────
             draw_overlay(frame, fps, builder)
             cv2.imshow("ASL Recognition", frame)
 
-            # ── 7. Send to RPi ────────────────────────────────────────
+            # sending to RPi
             if SEND_TO_RPI:
-                send_to_rpi(frame, builder.full_text)
+                send_to_rpi(frame, builder._last_confirmed, flagSwitch)
+                if flagSwitch == 1:
+                    break
 
-            # ── Keyboard controls ─────────────────────────────────────
+            # keyboard controls to quit
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
-                break
-            elif key == ord(" "):
-                builder.add_space()
-            elif key == 8:               # backspace
-                builder.backspace()
+                flagSwitch = 1
+                # break
+            # elif key == ord(" "):
+            #     builder.add_space()
+            # elif key == 8:               # backspace
+            #     builder.backspace()
             elif key == ord("c"):
                 builder.clear()
 
