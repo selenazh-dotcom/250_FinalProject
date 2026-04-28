@@ -42,7 +42,6 @@ On Node 2 (receiver):
 - python -m pip install opencv-python==4.8.1.78
 - python -m pip install pyttsx3
 - python -m pip install flask
-- python -m pip install socket
 
 TO RUN:    python3 receiver.py --port 5235 --web-port 8080
 
