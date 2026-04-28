@@ -14,9 +14,11 @@ Pipeline:
 
 Controls:
     Q          - quit
-    SPACE      - insert space between words
-    BACKSPACE  - delete last character
     C          - clear sentence
+
+Claude was used to help understand the pipeline. 
+It also assisted with the frame annotation functions.
+    
 """
 
 from __future__ import annotations
