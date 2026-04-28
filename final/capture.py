@@ -2,6 +2,13 @@
 capture.py
 
 Camera capture from mac, with annotations
+
+A lot of the code was copied from the following sources:
+    - https://github.com/manojsinghnegiwd/hand-tracking/blob/main/main.py 
+    - https://github.com/google-ai-edge/mediapipe/issues/6204 
+
+Claude was used to help debug because of issues with mediapipe being not up to date.
+
 """
 
 from __future__ import annotations
