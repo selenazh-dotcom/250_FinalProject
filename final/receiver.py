@@ -9,6 +9,9 @@ Function:
 Usage:
     In terminal - python3 receiver.py --port 5005 --web-port 8080
 
+
+Claude was used to create the HTML code for the flask app. 
+
 """
 
 from __future__ import annotations
