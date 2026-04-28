@@ -6,7 +6,7 @@ import socket
 import pickle
 import numpy as np
 import os
-import time
+#import time
 # import pyttsx3
 
 LAP_A_PORT = 5005
@@ -120,5 +120,5 @@ def fromMiddle():
 if __name__ == '__main__':
     vid()
     # speak()
-    time.sleep(10)
+    #time.sleep(10)
     fromMiddle()
